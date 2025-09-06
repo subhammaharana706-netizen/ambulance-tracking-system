@@ -1,0 +1,87 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>Ambulance — Tracking</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    body{font-family:system-ui;margin:18px}
+    input,button{display:block;margin:8px 0;padding:8px;width:100%;max-width:480px}
+    .card{border:1px solid #ddd;padding:12px;border-radius:8px;max-width:520px}
+    .small{font-size:0.9rem;color:#555}
+  </style>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+</head>
+<body>
+  <h1>Ambulance — Accept & Track</h1>
+
+  <div class="card">
+    <input id="ambulanceId" value="ambulance_101" placeholder="Ambulance ID"/>
+    <input id="driverName" value="Driver Ramesh" placeholder="Driver Name"/>
+    <button id="acceptBtn">Accept Request (Demo)</button>
+    <button id="startTrack" disabled>Start Tracking</button>
+    <button id="stopTrack" disabled>Stop Tracking</button>
+    <p class="small">Status: <span id="trackingStatus">idle</span></p>
+  </div>
+
+<script>
+  const firebaseConfig = {
+    apiKey: "FIREBASE_API_KEY",
+    authDomain: "PROJECT.firebaseapp.com",
+    databaseURL: "https://PROJECT.firebaseio.com",
+    projectId: "PROJECT",
+    storageBucket: "PROJECT.appspot.com",
+    messagingSenderId: "SENDER_ID",
+    appId: "APP_ID"
+  };
+  firebase.initializeApp(firebaseConfig);
+  const db = firebase.database();
+
+  const ambulanceId = document.getElementById('ambulanceId');
+  const driverName = document.getElementById('driverName');
+  const statusEl = document.getElementById('trackingStatus');
+  let watchId = null;
+
+  document.getElementById('acceptBtn').onclick = async () => {
+    // For demo: pick first pending request
+    const snap = await db.ref('requests').orderByChild('status').equalTo('requested').limitToFirst(1).get();
+    if (!snap.exists()) return alert('No pending requests');
+    const [reqId, req] = Object.entries(snap.val())[0];
+    await db.ref(`requests/${reqId}`).update({
+      status: 'assigned',
+      ambulanceId: ambulanceId.value
+    });
+    await db.ref(`ambulances/${ambulanceId.value}`).set({
+      driverName: driverName.value,
+      available: false,
+      updatedAt: Date.now()
+    });
+    alert(`Assigned to request ${reqId}`);
+    document.getElementById('startTrack').disabled = false;
+  };
+
+  document.getElementById('startTrack').onclick = () => {
+    statusEl.innerText = 'tracking...';
+    document.getElementById('startTrack').disabled = true;
+    document.getElementById('stopTrack').disabled = false;
+    watchId = navigator.geolocation.watchPosition(pos=>{
+      const payload = {
+        latitude: pos.coords.latitude,
+        longitude: pos.coords.longitude,
+        updatedAt: Date.now()
+      };
+      db.ref(`locations/${ambulanceId.value}`).set(payload);
+      statusEl.innerText = `GPS: ${payload.latitude.toFixed(5)}, ${payload.longitude.toFixed(5)}`;
+    });
+  };
+
+  document.getElementById('stopTrack').onclick = () => {
+    if (watchId!==null) navigator.geolocation.clearWatch(watchId);
+    statusEl.innerText = 'stopped';
+    document.getElementById('startTrack').disabled = false;
+    document.getElementById('stopTrack').disabled = true;
+  };
+</script>
+</body>
+</html>

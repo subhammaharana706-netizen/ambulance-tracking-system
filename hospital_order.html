@@ -1,0 +1,85 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>Hospital — Order Ambulance</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    body{font-family:system-ui;margin:18px}
+    input,select,button,textarea{display:block;margin:8px 0;padding:8px;width:100%;max-width:480px}
+    .card{border:1px solid #ddd;padding:12px;border-radius:8px;max-width:520px}
+    .small{font-size:0.9rem;color:#555}
+  </style>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+</head>
+<body>
+  <h1>Hospital — Request Ambulance</h1>
+
+  <div class="card">
+    <input id="hospitalId" value="hospital_01" placeholder="Hospital ID"/>
+    <input id="patientName" placeholder="Patient Name" />
+
+    <div>
+      <input id="pickupLat" placeholder="Pickup Latitude"/>
+      <input id="pickupLng" placeholder="Pickup Longitude"/>
+    </div>
+    <button id="useMyLocation">Use my current location</button>
+
+    <select id="priority">
+      <option value="normal">Normal</option>
+      <option value="urgent">Urgent</option>
+      <option value="critical">Critical</option>
+    </select>
+
+    <textarea id="notes" placeholder="Extra Notes"></textarea>
+    <button id="requestBtn">Request Ambulance</button>
+    <div id="statusArea" class="small">No requests yet.</div>
+  </div>
+
+<script>
+  const firebaseConfig = {
+    apiKey: "FIREBASE_API_KEY",
+    authDomain: "PROJECT.firebaseapp.com",
+    databaseURL: "https://PROJECT.firebaseio.com",
+    projectId: "PROJECT",
+    storageBucket: "PROJECT.appspot.com",
+    messagingSenderId: "SENDER_ID",
+    appId: "APP_ID"
+  };
+  firebase.initializeApp(firebaseConfig);
+  const db = firebase.database();
+
+  const hospitalId = document.getElementById('hospitalId');
+  const patientName = document.getElementById('patientName');
+  const pickupLat = document.getElementById('pickupLat');
+  const pickupLng = document.getElementById('pickupLng');
+  const priority = document.getElementById('priority');
+  const notes = document.getElementById('notes');
+  const statusArea = document.getElementById('statusArea');
+
+  document.getElementById('useMyLocation').onclick = () => {
+    navigator.geolocation.getCurrentPosition(pos=>{
+      pickupLat.value = pos.coords.latitude.toFixed(6);
+      pickupLng.value = pos.coords.longitude.toFixed(6);
+    });
+  };
+
+  document.getElementById('requestBtn').onclick = async () => {
+    const req = {
+      hospitalId: hospitalId.value,
+      patientName: patientName.value,
+      pickup: { lat: parseFloat(pickupLat.value), lng: parseFloat(pickupLng.value) },
+      priority: priority.value,
+      notes: notes.value,
+      createdAt: Date.now(),
+      status: 'requested',
+      ambulanceId: null
+    };
+    const ref = db.ref('requests').push();
+    await ref.set(req);
+    statusArea.innerText = `Request created (id: ${ref.key}). Waiting for assignment...`;
+  };
+</script>
+</body>
+</html>
