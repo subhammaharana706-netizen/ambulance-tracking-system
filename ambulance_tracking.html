@@ -1,87 +1,171 @@
-<!doctype html>
+<!DOCTYPE html>
 <html>
-<head>
-  <meta charset="utf-8"/>
-  <title>Ambulance — Tracking</title>
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <style>
-    body{font-family:system-ui;margin:18px}
-    input,button{display:block;margin:8px 0;padding:8px;width:100%;max-width:480px}
-    .card{border:1px solid #ddd;padding:12px;border-radius:8px;max-width:520px}
-    .small{font-size:0.9rem;color:#555}
-  </style>
-  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
-</head>
-<body>
-  <h1>Ambulance — Accept & Track</h1>
+  <head>
+    <meta charset="utf-8" />
+    <title>Ambulance Tracking</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
 
-  <div class="card">
-    <input id="ambulanceId" value="ambulance_101" placeholder="Ambulance ID"/>
-    <input id="driverName" value="Driver Ramesh" placeholder="Driver Name"/>
-    <button id="acceptBtn">Accept Request (Demo)</button>
-    <button id="startTrack" disabled>Start Tracking</button>
-    <button id="stopTrack" disabled>Stop Tracking</button>
-    <p class="small">Status: <span id="trackingStatus">idle</span></p>
-  </div>
+    <!-- Leaflet -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
 
-<script>
-  const firebaseConfig = {
-    apiKey: "FIREBASE_API_KEY",
-    authDomain: "PROJECT.firebaseapp.com",
-    databaseURL: "https://PROJECT.firebaseio.com",
-    projectId: "PROJECT",
-    storageBucket: "PROJECT.appspot.com",
-    messagingSenderId: "SENDER_ID",
-    appId: "APP_ID"
-  };
-  firebase.initializeApp(firebaseConfig);
-  const db = firebase.database();
+    <!-- Firebase -->
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
 
-  const ambulanceId = document.getElementById('ambulanceId');
-  const driverName = document.getElementById('driverName');
-  const statusEl = document.getElementById('trackingStatus');
-  let watchId = null;
+    <style>
+      body {
+        font-family: system-ui;
+        margin: 0;
+      }
+      #map {
+        height: 100vh;
+        width: 100%;
+      }
+      .legend {
+        position: absolute;
+        top: 10px;
+        left: 10px;
+        background: white;
+        padding: 8px;
+        border-radius: 6px;
+        font-size: 14px;
+        line-height: 1.4;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="map" style="width: 100%; height: 500px"></div>
+    <div class="legend">
+      <b>Legend:</b><br />
+      🚑 Ambulance<br />
+      📍 Pickup Location<br />
+      🏥 Hospital
+    </div>
 
-  document.getElementById('acceptBtn').onclick = async () => {
-    // For demo: pick first pending request
-    const snap = await db.ref('requests').orderByChild('status').equalTo('requested').limitToFirst(1).get();
-    if (!snap.exists()) return alert('No pending requests');
-    const [reqId, req] = Object.entries(snap.val())[0];
-    await db.ref(`requests/${reqId}`).update({
-      status: 'assigned',
-      ambulanceId: ambulanceId.value
-    });
-    await db.ref(`ambulances/${ambulanceId.value}`).set({
-      driverName: driverName.value,
-      available: false,
-      updatedAt: Date.now()
-    });
-    alert(`Assigned to request ${reqId}`);
-    document.getElementById('startTrack').disabled = false;
-  };
-
-  document.getElementById('startTrack').onclick = () => {
-    statusEl.innerText = 'tracking...';
-    document.getElementById('startTrack').disabled = true;
-    document.getElementById('stopTrack').disabled = false;
-    watchId = navigator.geolocation.watchPosition(pos=>{
-      const payload = {
-        latitude: pos.coords.latitude,
-        longitude: pos.coords.longitude,
-        updatedAt: Date.now()
+    <script>
+      //Firebase setup---->
+      const firebaseConfig = {
+        apiKey: "AIzaSyCVOmAoo9h2-VJ6I7OCK2Naj2fYQq_Io1s",
+        authDomain: "ambulance-tracking-syste-21793.firebaseapp.com",
+        databaseURL:
+          "https://ambulance-tracking-syste-21793-default-rtdb.asia-southeast1.firebasedatabase.app/",
+        projectId: "ambulance-tracking-syste-21793",
+        storageBucket: "ambulance-tracking-syste-21793.appspot.com",
+        messagingSenderId: "1057546446784",
+        appId: "1:1057546446784:web:9d31ba29b95928346fca25",
+        measurementId: "G-TSHRR7T645",
       };
-      db.ref(`locations/${ambulanceId.value}`).set(payload);
-      statusEl.innerText = `GPS: ${payload.latitude.toFixed(5)}, ${payload.longitude.toFixed(5)}`;
-    });
-  };
 
-  document.getElementById('stopTrack').onclick = () => {
-    if (watchId!==null) navigator.geolocation.clearWatch(watchId);
-    statusEl.innerText = 'stopped';
-    document.getElementById('startTrack').disabled = false;
-    document.getElementById('stopTrack').disabled = true;
-  };
-</script>
-</body>
+      // Initialize Firebase
+      firebase.initializeApp(firebaseConfig);
+      const db = firebase.database();
+
+      // Keep track of existing request IDs
+      // Track existing requests to avoid unwanted popups on refresh
+const existingRequestIDs = new Set();
+db.ref("requests").once("value", (snapshot) => {
+  snapshot.forEach((child) => existingRequestIDs.add(child.key));
+});
+
+// Listen for updates to requests (for ambulance acceptance, etc.)
+db.ref("requests").on("child_changed", (snapshot) => {
+  const req = snapshot.val();
+  const id = snapshot.key;
+
+  // Only process requests that exist (accepted) for this hospital
+  if (req && req.hospitalId === document.getElementById("hospitalId").value && req.status === "Accepted") {
+    // Show alert once
+    if (!req._alertShown) {
+      if (req.ambulanceLat && req.ambulanceLng) {
+        const distance = getDistanceFromLatLonInKm(
+          req.pickup.lat,
+          req.pickup.lng,
+          req.ambulanceLat,
+          req.ambulanceLng
+        );
+        alert(
+          `🚑 Your ambulance request has been accepted!\nDistance to ambulance: ${distance.toFixed(
+            2
+          )} km`
+        );
+      } else {
+        alert("🚑 Your ambulance request has been accepted!");
+      }
+      // Mark alert as shown locally
+      db.ref("requests/" + id + "/_alertShown").set(true);
+    }
+
+    // Update ambulance marker on map
+    if (req.ambulanceLat && req.ambulanceLng) {
+      if (!ambulanceMarker) {
+        ambulanceMarker = L.marker([req.ambulanceLat, req.ambulanceLng], {
+          icon: L.divIcon({ className: "", html: "🚑", iconSize: [24, 24] }),
+        }).addTo(map);
+      } else {
+        ambulanceMarker.setLatLng([req.ambulanceLat, req.ambulanceLng]);
+      }
+      // Zoom map to ambulance location
+      map.setView([req.ambulanceLat, req.ambulanceLng], 15);
+    }
+  }
+});
+
+// Optional: Only show new requests created after page load (if you ever need alerts for new requests)
+db.ref("requests").on("child_added", (snapshot) => {
+  const id = snapshot.key;
+  if (existingRequestIDs.has(id)) return; // ignore old requests
+  const req = snapshot.val();
+  if (!req) return;
+
+  // Zoom map to new pickup location
+  if (req.pickup && req.pickup.lat && req.pickup.lng) {
+    map.setView([req.pickup.lat, req.pickup.lng], 15);
+  }
+});
+
+
+      function startLiveTracking(id) {
+        setInterval(() => {
+          navigator.geolocation.getCurrentPosition((pos) => {
+            const lat = pos.coords.latitude;
+            const lng = pos.coords.longitude;
+
+            db.ref("requests/" + id).update({
+              ambulanceLat: lat,
+              ambulanceLng: lng,
+              status: "En Route",
+            });
+
+            // **Update map view to follow ambulance**
+            map.setView([lat, lng], 15);
+          });
+        }, 5000); // update every 5 seconds
+      }
+
+      // Accept request function
+      function acceptRequest(id) {
+        // Example: get ambulance's current location
+        navigator.geolocation.getCurrentPosition((pos) => {
+          db.ref("requests/" + id).update({
+            status: "Accepted",
+            ambulanceLat: pos.coords.latitude,
+            ambulanceLng: pos.coords.longitude,
+          });
+          alert("🚑 Request Accepted!");
+          startLiveTracking(id);
+        });
+      }
+
+      // Leaflet map
+      var map = L.map("map").setView([20.5937, 78.9629], 5);
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        attribution:
+          '&copy; <a href="https://www.openstreetmap.org/">OpenStreetMap</a> contributors',
+      }).addTo(map);
+
+      // Track requests
+      const pickupMarkers = {};
+    </script>
+  </body>
 </html>

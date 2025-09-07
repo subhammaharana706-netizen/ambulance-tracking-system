@@ -82,15 +82,17 @@
     <script>
       const statusArea = document.getElementById("statusArea");
 
-      // Firebase config (fill with your credentials)
+      // Firebase config
       const firebaseConfig = {
-        apiKey: "FIREBASE_API_KEY",
-        authDomain: "PROJECT.firebaseapp.com",
-        databaseURL: "https://PROJECT.firebaseio.com",
-        projectId: "PROJECT",
-        storageBucket: "PROJECT.appspot.com",
-        messagingSenderId: "SENDER_ID",
-        appId: "APP_ID",
+        apiKey: "AIzaSyCVOmAoo9h2-VJ6I7OCK2Naj2fYQq_Io1s",
+        authDomain: "ambulance-tracking-syste-21793.firebaseapp.com",
+        databaseURL:
+          "https://ambulance-tracking-syste-21793-default-rtdb.asia-southeast1.firebasedatabase.app/",
+        projectId: "ambulance-tracking-syste-21793",
+        storageBucket: "ambulance-tracking-syste-21793.appspot.com",
+        messagingSenderId: "1057546446784",
+        appId: "1:1057546446784:web:549e7f233fdd29786fca25",
+        measurementId: "G-0PM28YF030",
       };
       firebase.initializeApp(firebaseConfig);
       const db = firebase.database();
@@ -104,7 +106,6 @@
 
       let selectedCoords = null;
 
-      
       const pickupSearch = document.getElementById("pickupSearch");
       const suggestions = document.getElementById("suggestions");
 
@@ -184,13 +185,12 @@
           return;
         }
         statusArea.innerText =
-          "Using manually selected location: " +
-          pickupSearch.value;
+          "Using manually selected location: " + pickupSearch.value;
       };
 
       //Request Ambulance
       document.getElementById("requestBtn").onclick = async () => {
-        if (!selectedCoords) {
+        if (!selectedCoords || selectedCoords.length < 2) {
           alert("Please select a location first!");
           return;
         }
@@ -217,10 +217,70 @@
           ambulanceId: null,
         };
 
+        console.log("Request being sent:", req);
+
         const ref = db.ref("requests").push();
         await ref.set(req);
         statusArea.innerText = `Request created (id: ${ref.key}). Waiting for assignment...`;
+
+        const requestRef = db.ref("requests/" + ref.key);
+        requestRef.on("value", (snapshot) => {
+          const req = snapshot.val();
+          if (req && req.status === "Accepted") {
+            // Show distance if ambulance location is available
+            if (req.ambulanceLat && req.ambulanceLng) {
+              const distance = getDistanceFromLatLonInKm(
+                req.pickup.lat,
+                req.pickup.lng,
+                req.ambulanceLat,
+                req.ambulanceLng
+              );
+              alert(
+                `🚑 Your ambulance request has been accepted!\nDistance to ambulance: ${distance.toFixed(
+                  2
+                )} km`
+              );
+            } else {
+              alert("🚑 Your ambulance request has been accepted!");
+            }
+          }
+        });
+        requestRef.on("value", (snapshot) => {
+          const req = snapshot.val();
+          if (!req) return;
+
+          if (req.ambulanceLat && req.ambulanceLng) {
+            if (!ambulanceMarker) {
+              ambulanceMarker = L.marker([req.ambulanceLat, req.ambulanceLng], {
+                icon: L.divIcon({
+                  className: "",
+                  html: "🚑",
+                  iconSize: [24, 24],
+                }),
+              }).addTo(map);
+            } else {
+              ambulanceMarker.setLatLng([req.ambulanceLat, req.ambulanceLng]);
+            }
+          }
+        });
       };
+
+      function getDistanceFromLatLonInKm(lat1, lon1, lat2, lon2) {
+        const R = 6371; // Radius of the earth in km
+        const dLat = ((lat2 - lat1) * Math.PI) / 180;
+        const dLon = ((lon2 - lon1) * Math.PI) / 180;
+        const a =
+          Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+          Math.cos((lat1 * Math.PI) / 180) *
+            Math.cos((lat2 * Math.PI) / 180) *
+            Math.sin(dLon / 2) *
+            Math.sin(dLon / 2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        const d = R * c; // Distance in km
+        return d;
+      }
+
+      let ambulanceMarker = null;
 
       window.onload = function () {
         if (navigator.geolocation) {
