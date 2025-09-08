@@ -1,58 +1,203 @@
-<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8"/>
-  <title>Police Dashboard</title>
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <style>
-    #map{width:100%;height:90vh}
-  </style>
-  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
-  <script src="https://maps.googleapis.com/maps/api/js?key=YOUR_GOOGLE_MAPS_API_KEY"></script>
-</head>
-<body>
-  <h1>Traffic Police Dashboard</h1>
-  <div id="map"></div>
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Police Dashboard</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
 
-<script>
-  const firebaseConfig = {
-    apiKey: "FIREBASE_API_KEY",
-    authDomain: "PROJECT.firebaseapp.com",
-    databaseURL: "https://PROJECT.firebaseio.com",
-    projectId: "PROJECT",
-    storageBucket: "PROJECT.appspot.com",
-    messagingSenderId: "SENDER_ID",
-    appId: "APP_ID"
-  };
-  firebase.initializeApp(firebaseConfig);
-  const db = firebase.database();
+    <!-- Leaflet -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
 
-  let map;
-  const markers = {};
+    <!-- Firebase -->
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
 
-  function initMap() {
-    map = new google.maps.Map(document.getElementById("map"), {
-      center: { lat: 20.5937, lng: 78.9629 }, // India center
-      zoom: 5,
-    });
-
-    db.ref('locations').on('value', snapshot => {
-      const all = snapshot.val() || {};
-      for (const [id, loc] of Object.entries(all)) {
-        if (!markers[id]) {
-          markers[id] = new google.maps.Marker({
-            map,
-            title: `Ambulance ${id}`,
-            label: "🚑"
-          });
-        }
-        markers[id].setPosition({lat:loc.latitude, lng:loc.longitude});
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 0;
+        padding: 0;
+        background: #f5f5f5;
       }
-    });
-  }
+      header {
+        background: #1f2937;
+        color: white;
+        padding: 12px 20px;
+        font-size: 20px;
+      }
+      .container {
+        display: flex;
+        padding: 20px;
+        gap: 20px;
+      }
+      #map {
+        flex: 2;
+        height: 600px;
+        border: 1px solid #ccc;
+        border-radius: 6px;
+      }
+      .sidebar {
+        flex: 1;
+        background: white;
+        padding: 15px;
+        border-radius: 6px;
+        border: 1px solid #ddd;
+        overflow-y: auto;
+        max-height: 600px;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 10px;
+        font-size: 14px;
+      }
+      th,
+      td {
+        border: 1px solid #ddd;
+        padding: 6px;
+        text-align: left;
+      }
+      th {
+        background: #efefef;
+      }
+      .alert {
+        background: #dc2626;
+        color: white;
+        padding: 8px;
+        border-radius: 4px;
+        margin-top: 10px;
+        font-size: 14px;
+      }
+    </style>
+  </head>
+  <body>
+    <header>🚓 Police Dashboard</header>
 
-  window.onload = initMap;
-</script>
-</body>
+    <div class="container">
+      <div id="map"></div>
+      <div class="sidebar">
+        <h3>Ambulance Requests</h3>
+        <table id="requestsTable">
+          <thead>
+            <tr>
+              <th>Patient</th>
+              <th>Hospital</th>
+              <th>Priority</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+        <div id="alerts"></div>
+      </div>
+    </div>
+
+    <script>
+      // Firebase Config
+      const firebaseConfig = {
+        apiKey: "AIzaSyCVOmAoo9h2-VJ6I7OCK2Naj2fYQq_Io1s",
+        authDomain: "ambulance-tracking-syste-21793.firebaseapp.com",
+        databaseURL:"https://ambulance-tracking-syste-21793-default-rtdb.asia-southeast1.firebasedatabase.app/",
+        projectId: "ambulance-tracking-syste-21793",
+        storageBucket: "ambulance-tracking-syste-21793.appspot.com",
+        messagingSenderId: "1057546446784",
+        appId: "1:1057546446784:web:549e7f233fdd29786fca25",
+        measurementId: "G-0PM28YF030",
+      };
+      firebase.initializeApp(firebaseConfig);
+      const db = firebase.database();
+
+      // Map Init
+      const map = L.map("map").setView([20.59, 78.96], 5); // India
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(
+        map
+      );
+
+      const ambulanceMarkers = {};
+      const hospitalCircles = {};
+
+      function addRequestToTable(req, id) {
+        const tbody = document.querySelector("#requestsTable tbody");
+        const row = document.createElement("tr");
+        row.innerHTML = `
+        <td>${req.patientName || "-"}</td>
+        <td>${req.hospitalId || "-"}</td>
+        <td>${req.priority}</td>
+        <td>${req.status}</td>
+      `;
+        tbody.appendChild(row);
+      }
+
+      function getDistanceKm(lat1, lon1, lat2, lon2) {
+        const R = 6371;
+        const dLat = ((lat2 - lat1) * Math.PI) / 180;
+        const dLon = ((lon2 - lon1) * Math.PI) / 180;
+        const a =
+          Math.sin(dLat / 2) ** 2 +
+          Math.cos((lat1 * Math.PI) / 180) *
+            Math.cos((lat2 * Math.PI) / 180) *
+            Math.sin(dLon / 2) ** 2;
+        return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      }
+
+      // Listen to Requests
+      db.ref("requests").on("child_added", (snapshot) => {
+        const req = snapshot.val();
+        const id = snapshot.key;
+
+        addRequestToTable(req, id);
+
+        if (req.pickup?.lat && req.pickup?.lng) {
+          const hospitalCircle = L.circle([req.pickup.lat, req.pickup.lng], {
+            radius: 2000, // 2 km
+            color: "blue",
+            fillOpacity: 0.1,
+          }).addTo(map);
+          hospitalCircles[id] = hospitalCircle;
+        }
+      });
+
+      // Listen for ambulance updates
+      db.ref("requests").on("child_changed", (snapshot) => {
+        const req = snapshot.val();
+        const id = snapshot.key;
+
+        if (req.ambulanceLat && req.ambulanceLng) {
+          if (!ambulanceMarkers[id]) {
+            ambulanceMarkers[id] = L.marker(
+              [req.ambulanceLat, req.ambulanceLng],
+              {
+                icon: L.divIcon({
+                  html: "🚑",
+                  className: "",
+                  iconSize: [24, 24],
+                }),
+              }
+            ).addTo(map);
+          } else {
+            ambulanceMarkers[id].setLatLng([
+              req.ambulanceLat,
+              req.ambulanceLng,
+            ]);
+          }
+
+          // Check distance
+          if (req.pickup?.lat && req.pickup?.lng) {
+            const dist = getDistanceKm(
+              req.pickup.lat,
+              req.pickup.lng,
+              req.ambulanceLat,
+              req.ambulanceLng
+            );
+            if (dist <= 2) {
+              document.getElementById("alerts").innerHTML = `
+              <div class="alert">🚨 Ambulance near ${req.hospitalId} (within 2 km)</div>
+            `;
+            }
+          }
+        }
+      });
+    </script>
+  </body>
 </html>
